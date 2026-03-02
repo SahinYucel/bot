@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>Mesajlar - Anlık</title>
+  <link rel="stylesheet" href="/style/messages.css">
+</head>
+<body>
+  <h1>WhatsApp Mesajları</h1>
+  <div class="template-bar">
+    <label>İsim:</label>
+    <input type="text" id="templateName" value="Şahin" placeholder="İsim" />
+    <span class="template-preview">"Hello, welcome! I'm <strong id="templatePreviewName">Şahin</strong> from Maxtoria."</span>
+  </div>
+  <p class="status" id="status">Bağlanıyor...</p>
+  <div class="layout">
+    <div class="users">
+      <h3>Kullanıcılar</h3>
+      <div id="userList"></div>
+    </div>
+    <div class="messages">
+      <div class="messages-header">
+        <h3 id="selectedUserTitle">Tüm mesajlar</h3>
+        <button class="delete-btn" id="deleteBtn" style="display: none;" title="Mesajları sil">Sil</button>
+      </div>
+      <div id="list"></div>
+      <div class="reply-box" id="replyBox" style="display: none;">
+        <div class="reply-target" id="replyTarget" style="display: none;"></div>
+        <div class="reply-row">
+          <input type="text" id="replyInput" placeholder="Mesajınızı yazın..." />
+          <button type="button" class="template-btn" id="templateBtn" title="Şablon mesajı ekle">Şablon</button>
+          <button id="replyBtn">WhatsApp ile Gönder</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let API_URL = '';
+    let allMessages = [];
+    let selectedPhone = null;
+    let selectedMessageId = null;
+    const waIcon = '<svg class="wa-icon" viewBox="0 0 24 24" fill="#25D366" width="24" height="24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>';
+
+
+    async function loadMessages() {
+      const res = await fetch(`${API_URL || ''}/api/messages?limit=200`);
+      const { messages } = await res.json();
+      allMessages = messages;
+      renderUsers();
+      renderMessages();
+    }
+
+    function getUsers() {
+      const users = new Map();
+      for (const m of allMessages) {
+        const key = m.phone;
+        if (!users.has(key)) {
+          users.set(key, { phone: m.phone, userName: m.userName, count: 0 });
+        }
+        users.get(key).count++;
+      }
+      return Array.from(users.values()).sort((a, b) => b.count - a.count);
+    }
+
+    function renderUsers() {
+      const users = getUsers();
+      const html = `
+        <button class="user-btn ${selectedPhone === null ? 'active' : ''}" data-phone="">
+          Tümü (${allMessages.length})
+        </button>
+        ${users.map(u => `
+          <button class="user-btn ${selectedPhone === u.phone ? 'active' : ''}" data-phone="${u.phone}">
+            ${escapeHtml(u.userName || u.phone)}
+            <div class="phone">${u.phone}</div>
+          </button>
+        `).join('')}
+      `;
+      document.getElementById('userList').innerHTML = html || '<div class="empty">Henüz mesaj yok</div>';
+      document.querySelectorAll('.user-btn').forEach(btn => {
+        btn.onclick = () => {
+          selectedPhone = btn.dataset.phone || null;
+          selectedMessageId = null;
+          renderUsers();
+          renderMessages();
+        };
+      });
+    }
+
+    function renderMessages() {
+      const filtered = selectedPhone
+        ? allMessages.filter(m => m.phone === selectedPhone)
+        : allMessages;
+      const user = selectedPhone ? getUsers().find(u => u.phone === selectedPhone) : null;
+      document.getElementById('selectedUserTitle').textContent = user
+        ? `${user.userName || user.phone} (${filtered.length} mesaj)`
+        : `Tüm mesajlar (${filtered.length})`;
+      const deleteBtn = document.getElementById('deleteBtn');
+      if (allMessages.length > 0) {
+        deleteBtn.style.display = 'inline-block';
+        deleteBtn.textContent = selectedPhone ? 'Bu kullanıcıyı sil' : 'Tümünü sil';
+        deleteBtn.onclick = () => deleteMessages(selectedPhone);
+      } else {
+        deleteBtn.style.display = 'none';
+      }
+      document.getElementById('list').innerHTML = filtered.length
+        ? filtered.map(msgHtml).join('')
+        : '<div class="empty">Bu kullanıcıya ait mesaj yok</div>';
+      const replyBox = document.getElementById('replyBox');
+      const replyInput = document.getElementById('replyInput');
+      const replyTarget = document.getElementById('replyTarget');
+      if (selectedPhone && getUsers().some(u => u.phone === selectedPhone)) {
+        replyBox.style.display = 'flex';
+        replyBox.style.flexDirection = 'column';
+        replyInput.placeholder = selectedMessageId ? 'Seçili mesaja yanıt ver...' : `${selectedPhone} numarasına yanıt ver...`;
+        if (selectedMessageId) {
+          const selMsg = filtered.find(m => (m.id || `local_${m.timestamp || ''}_${m.phone}`) === selectedMessageId);
+          replyTarget.style.display = 'block';
+          replyTarget.innerHTML = `Yanıtlanıyor: <em>${escapeHtml((selMsg?.message || '').slice(0, 60))}${(selMsg?.message?.length || 0) > 60 ? '...' : ''}</em> <button class="clear-reply" type="button">×</button>`;
+          replyTarget.querySelector('.clear-reply')?.addEventListener('click', () => { selectedMessageId = null; renderMessages(); });
+        } else {
+          replyTarget.style.display = 'none';
+        }
+      } else {
+        replyBox.style.display = 'none';
+      }
+      document.querySelectorAll('.msg-reply-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          selectedMessageId = btn.dataset.id;
+          selectedPhone = btn.dataset.phone || selectedPhone;
+          renderUsers();
+          renderMessages();
+        };
+      });
+    }
+
+    function msgHtml(m) {
+      const msgId = m.id || `local_${m.timestamp || ''}_${m.phone}`;
+      const idPart = m.id ? `<span class="msg-id" title="Message ID">#${escapeHtml(String(m.id))}</span>` : '';
+      const replyBtn = `<button class="msg-reply-btn" data-id="${escapeHtml(msgId)}" data-phone="${escapeHtml(m.phone)}" title="Bu mesaja yanıtla">Yanıtla</button>`;
+      const sel = selectedMessageId === msgId ? ' msg-selected' : '';
+      return `<div class="msg${sel}" data-id="${escapeHtml(msgId)}"><span class="wa-icon">${waIcon}</span><div class="content"><div class="meta">${escapeHtml(m.userName || m.phone)} · ${m.dateTime} ${idPart} ${replyBtn}</div><div class="text">${escapeHtml(m.message)}</div></div></div>`;
+    }
+    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    let streamEvt = null;
+    function connectStream() {
+      if (streamEvt) streamEvt.close();
+      const evt = new EventSource(`${API_URL || ''}/api/messages/stream`);
+      streamEvt = evt;
+      evt.onopen = () => { document.getElementById('status').textContent = 'Canlı bağlantı ✓'; };
+      evt.onmessage = (e) => {
+        if (e.data.startsWith(':')) return;
+        const msg = JSON.parse(e.data);
+        allMessages.unshift(msg);
+        renderUsers();
+        renderMessages();
+        document.getElementById('status').textContent = 'Canlı bağlantı ✓';
+      };
+      evt.onerror = () => {
+        evt.close();
+        document.getElementById('status').textContent = 'Canlı bağlantı yok. Polling ile güncelleniyor...';
+        startPolling();
+      };
+    }
+    function startPolling() {
+      if (window.pollInterval) return;
+      window.pollInterval = setInterval(loadMessages, 3000);
+    }
+
+    async function sendReply() {
+      if (!selectedPhone) return;
+      const input = document.getElementById('replyInput');
+      const msg = input.value.trim();
+      if (!msg) return;
+      const btn = document.getElementById('replyBtn');
+      btn.disabled = true;
+      btn.textContent = 'Gönderiliyor...';
+      try {
+        const res = await fetch(`${API_URL || ''}/api/reply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ to: selectedPhone, message: msg, message_id: selectedMessageId || undefined })
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.message || 'Hata');
+        input.value = '';
+        selectedMessageId = null;
+        renderMessages();
+        document.getElementById('status').textContent = 'Mesaj gönderildi ✓';
+      } catch (e) {
+        document.getElementById('status').textContent = 'Gönderilemedi: ' + (e.message || e);
+      }
+      btn.disabled = false;
+      btn.textContent = 'WhatsApp ile Gönder';
+    }
+    document.getElementById('replyBtn').onclick = sendReply;
+    document.getElementById('replyInput').onkeypress = (e) => { if (e.key === 'Enter') sendReply(); };
+
+    const templateNameInput = document.getElementById('templateName');
+    const templatePreviewName = document.getElementById('templatePreviewName');
+    templateNameInput.oninput = () => { templatePreviewName.textContent = templateNameInput.value || 'Şahin'; };
+    document.getElementById('templateBtn').onclick = () => {
+      const name = templateNameInput.value.trim() || 'Şahin';
+      document.getElementById('replyInput').value = `Hello, welcome! I'm ${name} from Maxtoria.`;
+      document.getElementById('replyInput').focus();
+    };
+
+    async function deleteMessages(phone) {
+      const target = phone ? 'bu kullanıcının mesajlarını' : 'tüm mesajları';
+      if (!confirm(`${target} silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`)) return;
+      try {
+        const url = phone
+          ? `${API_URL || ''}/api/messages?phone=${encodeURIComponent(phone)}`
+          : `${API_URL || ''}/api/messages?all=1`;
+        const res = await fetch(url, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Hata');
+        selectedPhone = null;
+        selectedMessageId = null;
+        await loadMessages();
+        document.getElementById('status').textContent = `${data.deleted} mesaj silindi ✓`;
+      } catch (e) {
+        document.getElementById('status').textContent = 'Silinemedi: ' + (e.message || e);
+      }
+    }
+
+    (async function init() {
+      try {
+        const c = await fetch('/api/config').then(r => r.json());
+        API_URL = (c.baseUrl || '').replace(/\/$/, '');
+      } catch {}
+      loadMessages().catch(() => document.getElementById('status').textContent = 'Sunucuya ulaşılamıyor. URL kontrol edin.');
+      connectStream();
+    })();
+  </script>
+</body>
+</html>
